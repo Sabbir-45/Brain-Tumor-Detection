@@ -16,22 +16,27 @@ import gdown  # Google Drive download
 # CONFIG
 # =========================
 UPLOAD_FOLDER = "uploads"
-MODEL_WEIGHTS_PATH = "models/vgg19_finetuned_best.h5"
+MODEL_FOLDER = "models"
+MODEL_WEIGHTS_PATH = os.path.join(MODEL_FOLDER, "vgg19_finetuned_best.h5")
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
 
-# Google Drive FILE_ID (from your link)
+# Google Drive FILE_ID (from your shared link)
 GDRIVE_FILE_ID = "1ac_C4G6zsmkc5kA4yPLPpcZEZlHUaJb1"
 GDRIVE_URL = f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}"
 
+# Create folders if not exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs("models", exist_ok=True)
+os.makedirs(MODEL_FOLDER, exist_ok=True)
 
+# =========================
+# FLASK APP
+# =========================
 app = Flask(__name__)
 app.secret_key = "super_secret_key"
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 # =========================
-# Download model if not exists
+# Download model if missing
 # =========================
 if not os.path.exists(MODEL_WEIGHTS_PATH):
     print("Downloading model from Google Drive...")
@@ -112,33 +117,25 @@ def predict():
                           np.mean(np.abs(G - B)) +
                           np.mean(np.abs(R - B))) / 3
     if grayscale_distance > 7:
-        return render_template("result.html",
-                               result="❌ Invalid Image",
-                               score=0, image_file=filename)
+        return render_template("result.html", result="❌ Invalid Image", score=0, image_file=filename)
 
     # Aspect ratio check
     w, h = img.size
     if not (0.75 <= w / h <= 1.35):
-        return render_template("result.html",
-                               result="❌ Invalid MRI",
-                               score=0, image_file=filename)
+        return render_template("result.html", result="❌ Invalid MRI", score=0, image_file=filename)
 
     # Edge density check
     gray = cv2.cvtColor(arr.astype("uint8"), cv2.COLOR_RGB2GRAY)
     edges = cv2.Canny(gray, 50, 150)
     edge_density = np.sum(edges > 0) / edges.size
     if edge_density < 0.008 or edge_density > 0.12:
-        return render_template("result.html",
-                               result="❌ Invalid MRI.",
-                               score=0, image_file=filename)
+        return render_template("result.html", result="❌ Invalid MRI.", score=0, image_file=filename)
 
     # Circle detection (brain curvature)
     circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=80,
                                param1=50, param2=28, minRadius=60, maxRadius=260)
     if circles is None:
-        return render_template("result.html",
-                               result="❌ Invalid MRI — brain structure not detected.",
-                               score=0, image_file=filename)
+        return render_template("result.html", result="❌ Invalid MRI — brain structure not detected.", score=0, image_file=filename)
 
     # =========================
     # TUMOR PREDICTION
@@ -147,10 +144,7 @@ def predict():
     prob = float(tumor_model.predict(img_pp, verbose=0)[0][0])
     status = "🧠 Tumor Detected" if prob >= 0.5 else "🧠 No Tumor Detected"
 
-    return render_template("result.html",
-                           result=status,
-                           score=round(prob*100, 2),
-                           image_file=filename)
+    return render_template("result.html", result=status, score=round(prob*100, 2), image_file=filename)
 
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename):
@@ -162,5 +156,5 @@ def health():
 
 # =========================
 if __name__ == "__main__":
-    # For Render deploy, debug=False in production
-    app.run(debug=True)
+    # debug=True only for local testing, set debug=False for Render
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
